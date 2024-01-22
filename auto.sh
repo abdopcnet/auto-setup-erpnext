@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -ex
+set -e
 
 # Setting up colors for echo commands
 YELLOW='\033[1;33m'
