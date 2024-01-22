@@ -15,6 +15,9 @@ if [ "$(lsb_release -is)" != "Ubuntu" ] || [ "$(lsb_release -rs)" != "22.04" ]; 
     exit 1
 fi
 
+# Retrieve server IP
+server_ip=$(hostname -I | awk '{print $1}')
+
 # Prompt user for site name
 read -p "Enter the website name: " site_name
 
@@ -57,8 +60,11 @@ fi
 # Install NVM, Node, npm, and yarn
 echo -e "${YELLOW}Installing NVM, Node, npm, and yarn...${NC}"
 sleep 2
-curl https://raw.githubusercontent.com/creationix/nvm/master/install.sh | bash
-source ~/.profile
+
+curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.38.0/install.sh | bash
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 
 nvm install --lts
 
@@ -99,6 +105,9 @@ sudo bench --site $site_name set-admin-password $admin_password
 # Restart services
 sudo service supervisor restart
 sudo service nginx restart
+
+echo -e "${GREEN}Setup completed successfully.${NC}"
+sleep 2
 
 # Display information
 echo -e "${GREEN}-----------------------------------------------------------------------------------------------"
