@@ -15,9 +15,6 @@ if [ "$(lsb_release -is)" != "Ubuntu" ] || [ "$(lsb_release -rs)" != "22.04" ]; 
     exit 1
 fi
 
-# Retrieve server IP
-server_ip=$(hostname -I | awk '{print $1}')
-
 # Prompt user for site name
 read -p "Enter the website name: " site_name
 
@@ -99,11 +96,9 @@ bench setup production $USER
 # Set site administrator password
 sudo bench --site $site_name set-admin-password $admin_password
 
-# Restart services with supervisor
-echo -e "${YELLOW}Restarting services with supervisor...${NC}"
-sudo supervisorctl reread
-sudo supervisorctl update
-sudo supervisorctl restart all
+# Restart services
+sudo service supervisor restart
+sudo service nginx restart
 
 # Display information
 echo -e "${GREEN}-----------------------------------------------------------------------------------------------"
@@ -120,7 +115,7 @@ echo -e "-----------------------------------------------------------------------
 # Message for Future Support Team
 echo -e "${YELLOW}-----------------------------------------------------------------------------------------------"
 echo -e "For future support, contact the support team at:"
-echo -e "Phone: 002-01156483669"
+echo -e "Call: 002-01156483669"
 echo -e "WhatsApp: https://wa.me/201156483669/"
 echo -e "Include details about your system configuration and any issues you encounter."
 echo -e "Thank you for choosing ERPNext!${NC}"
