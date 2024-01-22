@@ -1,753 +1,126 @@
-#!/bin/bash
-bold=$(tput bold)
-normal=$(tput sgr0)
- 
+#!/usr/bin/env bash
+
+set -e
+
+# Setting up colors for echo commands
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
 RED='\033[0;31m'
-NC='\033[0m'
- 
-accept="Y"
-multi_tenancy=false
- 
-is_arm=false
- 
-function validate_user() {
-    egrep "^$1" /etc/passwd >/dev/null
-    if [ $? -eq 0 ]; then
-        echo "$1 exists! Please use a different user name"
-        return 1
-    else
-        return 0
-    fi
-}
- 
-function deps_installation() {
-Step - 1    # First install python, pip and redis
-    sudo apt install git python3-dev python3-pip redis-server -y
- 
-Step - 2    # Install mariadb server and client
-    sudo apt-get install mariadb-server -y
-    sudo apt-get install mariadb-client -y
- 
-Step - 3    # Install nvm and then node 14
-    if [ "$2" = true ]; then
-        sudo -u $1 bash -c "cd /home/${1} && wget https://nodejs.org/download/release/v16.20.1/node-v16.20.1-linux-arm64.tar.xz && tar -xf node-v16.20.1-linux-arm64.tar.xz && sudo cp -r node-v16.20.1-linux-arm64/* /usr/local/"
-    else
-        sudo -u $1 bash -c "cd /home/${1} && wget https://nodejs.org/download/release/v16.20.1/node-v16.20.1-linux-x64.tar.xz && tar -xf node-v16.20.1-linux-x64.tar.xz && sudo cp -r node-v16.20.1-linux-x64/* /usr/local/"
-    fi
-    sudo -u $1 bash -c "sudo npm install -g yarn"
- 
-Step - 4    # sudo -u $1 bash -c "npm config set python python3"
- 
-Step - 5    # Install wkhtmltopdf
-    sudo apt-get install xvfb libfontconfig wkhtmltopdf -y
- 
-Step - 6    #Install python virtualenv
-    sudo apt install python3.10-venv -y
-}
- 
-function mariadb_config() {
-Step - 7    # Configure my.cnf
-    echo -e "[mysqld]\ncharacter-set-client-handshake = FALSE\ncharacter-set-server = utf8mb4\ncollation-server = utf8mb4_unicode_ci\n\n[mysql]\ndefault-character-set = utf8mb4" | sudo tee -a /etc/mysql/my.cnf
- 
-Step - 8    # Restart the mysql server
-    sudo service mysql restart
-}
- 
-function frappe_installation() {
-    echo "Installing Bench"
-Step - 9    # Install Frappe bench
-    sudo -u $1 bash -c "sudo pip3 install frappe-bench"
-    
-    python_version=$(python3 --version | cut -d " " -f 2)
-Step - 10    # Edit bench util file so it can start supervisor with sudo
-    sudo sed -i 's/{sudo}supervisorctl restart {group}/sudo supervisorctl restart all/g' /usr/local/lib/python3.10/dist-packages/bench/utils/bench.py
-    
-    echo "Initializing bench"
-Step - 11    # Initialize a bench with a given erpnext version
-    sudo -u $1 bash -c "cd /home/${1}; bench init --frappe-branch=${2} ${3}"
-    
-Step - 12    # Check if bench is installed properly
-    # common_site_file="/home/${1}/${3}/sites/common_site_config.json"
-    # if [ -e "$common_site_file" ]; then
-    # 	echo "Bench installation successful"
-    # else
-    # 	echo "Bench not installed properly"
-    # 	exit 1
-    # fi
-}
- 
-function erpnext_install() {
-Step - 13    # create the site
-    sudo -u $1 bash -c "cd /home/${1}/${6} && bench new-site ${2} --db-root-password ${3} --admin-password ${4}"
-    
-    # Check if the site is created properly
-    # site_file="/home/${1}/${6}/sites/${2}/site_config.json"
-    # if [ -e "$site_file" ]; then
-    # 	echo "Site installation successful"
-    # else
-    # 	echo "Site not installed properly"
-    # 	exit 1
-    # fi
-    
-    if [ "$7" = false ]; then
-        echo "Get the apps"
-Step - 14        # get bench payment app
-        sudo -u $1 bash -c "cd /home/${1}/${6} && bench get-app payments; bench get-app --branch ${5} erpnext; bench --site ${2} install-app erpnext"
-    else
-        sudo -u $1 bash -c "cd /home/${1}/${6} && bench --site ${2} install-app erpnext"
-    fi
-    # get the erpnext app
-    # bench get-app --branch $5 erpnext
-    
-    # echo "Installing the apps on Site"
-    # Install erpnext
-    # bench --site $2 install-app erpnext
-}
- 
-cat <<"EOF"
-----------------------------------------------------------------
-  _____   ____    ____    _   _                 _
- | ____| |  _ \  |  _ \  | \ | |   ___  __  __ | |_
- |  _|   | |_) | | |_) | |  \| |  / _ \ \ \/ / | __|
- | |___  |  _ <  |  __/  | |\  | |  __/  >  <  | |_
- |_____| |_| \_\ |_|     |_| \_|  \___| /_/\_\  \__|
- 
-  __  __
- |  \/  |   __ _   _ __     __ _    __ _    ___   _ __
- | |\/| |  / _` | | '_ \   / _` |  / _` |  / _ \ | '__|
- | |  | | | (_| | | | | | | (_| | | (_| | |  __/ | |
- |_|  |_|  \__,_| |_| |_|  \__,_|  \__, |  \___| |_|
-                                   |___/
- 
-----------------------------------------------------------------
-EOF
- 
-echo
-echo "Please select 1-2 to manage ERPNext"
-echo
-echo "1). Update SSL for sites"
-echo "2). Install a new site"
-echo "3). Install and Setup ERPNext"
-echo
- 
-read -p "Please enter your choice: " man_choice
-if [ $man_choice == 1 ]; then
-cat <<"EOF"
--------------------------------------
-/   ____ ____  _                     \
-/  / ___/ ___|| |                    \
-/  \___ \___ \| |                    \
-/   ___) |__) | |___                 \
-/  |____/____/|_____|                \
-/                                    \
-/   _   _           _       _        \
-/  | | | |_ __   __| | __ _| |_ ___  \
-/  | | | | '_ \ / _` |/ _` | __/ _ \ \
-/  | |_| | |_) | (_| | (_| | ||  __/ \
-/   \___/| .__/ \__,_|\__,_|\__\___| \
-/        |_|                         \
--------------------------------------
-EOF
- 
-    echo "Update SSL only if ${bold}CERTBOT${normal} is installed"
-    if ! command -v certbot > /dev/null 2>&1; then
-        echo "Certbot not found. Exiting..."
-        exit 1
-    fi
- 
-    sudo certbot --nginx #<<EOF
- 
-elif [ $man_choice == 2 ]; then
-cat <<"EOF"
--------------------------------------------------------------------------------
-/   _   _                       ____    _   _                                  \
-/  | \ | |   ___  __      __   / ___|  (_) | |_    ___                         \
-/  |  \| |  / _ \ \ \ /\ / /   \___ \  | | | __|  / _ \                        \
-/  | |\  | |  __/  \ V  V /     ___) | | | | |_  |  __/                        \
-/  |_| \_|  \___|   \_/\_/     |____/  |_|  \__|  \___|                        \
-/                                                                              \
-/   ___                 _             _   _           _     _                  \
-/  |_ _|  _ __    ___  | |_    __ _  | | | |   __ _  | |_  (_)   ___    _ __   \
-/   | |  | '_ \  / __| | __|  / _` | | | | |  / _` | | __| | |  / _ \  | '_ \  \
-/   | |  | | | | \__ \ | |_  | (_| | | | | | | (_| | | |_  | | | (_) | | | | | \
-/  |___| |_| |_| |___/  \__|  \__,_| |_| |_|  \__,_|  \__| |_|  \___/  |_| |_| \
-/                                                                              \
--------------------------------------------------------------------------------
-EOF
-    multi_tenancy=true
- 
-    while :
-    do
-        while :
-        do
-            read -p $'Please enter the username that is used to install ERPNext: \n' username
-            egrep "^$username" /etc/passwd >/dev/null
-            if [[ $? -ne 0 ]]; then
-                echo "User not found!"
-                continue
-            elif [ -z "$username" ]; then
-                continue
-            else
-                break
-            fi
-        done
-        while :
-        do
-            read -p $'Please enter the site name: \n' new_sitename
-            [ -z "$new_sitename" ] && continue || break
-        done
- 
-        while :
-        do
-            read -s -p $'Please enter the ERPNext admin password: \n' new_adminpassword
-            [ -z "$new_adminpassword" ] && continue || break
-        done
-        while :
-        do
-            read -s -p $'Please enter the MariaDB root password: \n' mysql_root_password
-            [ -z "$new_adminpassword" ] && continue || break
-        done
-        while :
-        do
-            read -p $'Please enter Absolute path to Frappe folder (should include the folder name as well): \n' abs_path
-            sudo -u $username ls $abs_path/sites/common_site_config.json
-            if [[ $? -ne 0 ]]; then
-                echo "No ERPNext installation found at this PATH!"
-                echo "Please Enter a valid PATH"
-                continue
-            elif [ -z "$abs_path" ]; then
-                continue
-            else
-                break
-            fi
- 
-        done
-        # if [ "${is_arm}" = true ]; then
-        #     echo "port 11000" | sudo tee -a /etc/redis/redis.conf
-        #     sudo systemctl restart redis-server
-        # fi
- 
-        sudo -u $username bash -c "cd ${abs_path} && bench config dns_multitenant on"
-        sudo -u $username bash -c "cd ${abs_path} && bench new-site ${new_sitename} --db-root-password ${mysql_root_password} --admin-password ${new_adminpassword}"
-        sudo -u $username bash -c "cd ${abs_path} && bench --site ${new_sitename} install-app erpnext"
- 
-        # if [ "${is_arm}" = true ]; then
-        #     sudo sed -i 's/port 11000//g' /etc/redis/redis.conf
-        #     sudo systemctl restart redis-server
-        # fi
- 
-        echo "Do you want to add more sites?"
-        read -p "Please enter ${bold}Y${normal} to add more site or ${bold}any key${normal} to continue: " is_more_sites
- 
-        if [[ "${is_more_sites,,}" == "${accept,,}" ]]; then
-            continue
-        else
-            break
-        fi
-    done
-    sudo -u $username bash -c "cd ${abs_path} && bench setup nginx"
-    sudo systemctl reload nginx
-    sudo certbot --nginx
- 
-    echo
-    echo "${bold}Installation Finished! Enjoy...${normal}"
-    echo
- 
-elif [ $man_choice == 3 ]; then
-cat << "EOF"
--------------------------------------------------------------------------
-/    _____ ______ ______  _   _              _                          \
-/   |  ___|| ___ \| ___ \| \ | |            | |                         \
-/   | |__  | |_/ /| |_/ /|  \| |  ___ __  __| |_                        \
-/   |  __| |    / |  __/ | . ` | / _ \\ \/ /| __|                       \
-/   | |___ | |\ \ | |    | |\  ||  __/ >  < | |_                        \
-/   \____/ \_| \_|\_|    \_| \_/ \___|/_/\_\ \__|                       \
-/                                                                       \
-/                                                                       \
-/    _____             _          _  _         _    _                   \
-/   |_   _|           | |        | || |       | |  (_)                  \
-/     | |  _ __   ___ | |_  __ _ | || |  __ _ | |_  _   ___   _ __      \
-/     | | | '_ \ / __|| __|/ _` || || | / _` || __|| | / _ \ | '_ \     \
-/    _| |_| | | |\__ \| |_| (_| || || || (_| || |_ | || (_) || | | |    \
-/    \___/|_| |_||___/ \__|\__,_||_||_| \__,_| \__||_| \___/ |_| |_|    \
-/                                                                       \
-/                                                                       \
--------------------------------------------------------------------------
-EOF
- 
-cat << "EOF"
- _____        _                 
-/  ___|      | |                
-\ `--.   ___ | |_  _   _  _ __  
- `--. \ / _ \| __|| | | || '_ \ 
-/\__/ /|  __/| |_ | |_| || |_) |
-\____/  \___| \__| \__,_|| .__/ 
-                         | |    
-                         |_|    
-EOF
- 
-while :
-do
-    read -p $'Enter username [default: erpnext]: \n' username
-    if [ -z "$username" ]; then
-        username="erpnext"
-        validate_user $username
-        [ $? -eq 0 ] && break || continue
-    else
-        validate_user $username
-        [ $? -eq 0 ] && break || continue
-    fi
-done
- 
-while :
-do
-    read -s -p $'Enter password\n' password
-    [ -z "$password" ] && continue || break
-done
- 
-while :
-do
-    echo -e "${bold}${RED}Warning! Please use the same mysql root password given here when securing MariaDB${NC}"
-    read -s -p $'Enter mysql root password: \n' mysql_root_password
-    [ -z "$mysql_root_password" ] && continue || break
-done
- 
-read -p $'Please enter the version [default: version-14]: \n' version
-if [ -z "$version" ]; then
-    version="version-14"
-fi
- 
-read -p $'Please enter the bench name [default: frappe-bench]: \n' bench_name
-if [ -z "$bench_name" ]; then
-    bench_name="frappe-bench"
-fi
- 
-while :
-do
-    read -p $'Please enter the site name: \n' sitename
-    [ -z "$sitename" ] && continue || break
-done
- 
-while :
-do
-    read -s -p $'Please enter the ERPNext admin password: \n' adminpassword
-    [ -z "$adminpassword" ] && continue || break
-done
- 
-while :
-do
-    read -p $'Please select x86 or ARM64. For x86 type "x86" ARM64 type "arm64": \n' arch
-    if [[ "${arch,,}" == "x86" ]]; then
-        is_arm=false
-        break
-    elif [[ "${arch,,}" == "arm64" ]]; then
-        is_arm=true
-        break
-    else
-        echo -e "${RED} Unknown Architecture${NC}"
-    fi
-done
- 
-echo
-echo "Server Username: " $username
-echo "Server Password: " $password
-echo "MySQL Password: " $mysql_root_password
-echo "Frappe Version: " $version
-echo "Bench name: " $bench_name
-echo "Site name: " $sitename
-echo "ERPNext Admin Password: " $adminpassword
-echo "Selected CPU Architecture: " $arch
-echo
-echo $'Please verify the inputs. You can change them if you wish\n'
- 
-while :
-do
-    echo "------------------------------------------"
-    echo 'a: change server username'
-    echo 'b: change server user password'
-    echo 'c: change mysql root password'
-    echo 'd: change Frappe version'
-    echo 'e: change bench name'
-    echo 'f: change the site name'
-    echo 'g: change ERPNext admin password'
-    echo 'h: change CPU Architecture'
-    echo 'i: exit menu'
-    echo "------------------------------------------"
- 
-    read -p $'Press a-i to change the input or press "i" exit changing: ' new_input
- 
-    invalid_option=true
- 
-    case $new_input in
-        a)
-            while :
-            do
-                read -p $'Enter username [default: erpnext]: \n' username
-                if [ -z "$username" ]; then
-                    username="erpnext"
-                    validate_user $username
-                    [ $? -eq 0 ] && break || continue
-                else
-                    validate_user $username
-                    [ $? -eq 0 ] && break || continue
-                fi
-            done
-            ;;
-        b)
-            while :
-            do
-                read -s -p $'Enter password\n' password
-                [ -z "$password" ] && continue || break
-            done
-            ;;
-        c)
-            while :
-            do
-                echo -e "${bold}${RED}Warning! Please use the same mysql root password given here when securing MariaDB${NC}"
-                read -s -p $'Enter mysql root password: \n' mysql_root_password
-                [ -z "$mysql_root_password" ] && continue || break
-            done
-            ;;
-        d)
-            read -p $'Please enter the version [default: version-14]: \n' version
-            if [ -z "$version" ]; then
-                version="version-14"
-            fi
-            ;;
-        e)
-            read -p $'Please enter the bench name [default: frappe-bench]: \n' bench_name
-            if [ -z "$bench_name" ]; then
-                bench_name="frappe-bench"
-            fi
-            ;;
-        f)
-            while :
-            do
-                read -p $'Please enter the site name: \n' sitename
-                [ -z "$sitename" ] && continue || break
-            done
-            ;;
-        g)
-            while :
-            do
-                read -s -p $'Please enter the ERPNext admin password: \n' adminpassword
-                [ -z "$adminpassword" ] && continue || break
-            done
-            ;;
-        h)
-            while :
-            do
-                read -p $'Please select x86 or ARM64. For x86 type "x86" ARM64 type "arm64": \n' arch
-                if [[ "${arch,,}" == "x86" ]]; then
-                    is_arm=false
-                    break
-                elif [[ "${arch,,}" == "arm64" ]]; then
-                    is_arm=true
-                    break
-                else
-                    echo -e "${RED} Unknown Architecture${NC}"
-                fi
-            done
-            ;;
-        i)
-            invalid_option=false
-            ;;
-        *)
-            echo "Wrong input, please input a valid option"
-            invalid_option=true
-            ;;
-    esac
-    if [ "$invalid_option" = true ]; then
-        continue
-    else
-        echo "Press ${bold}Y${normal} to confirm or press any key to change a value"
-        read -p $'Please enter your choice: ' confirmation
-        if [[ "${confirmation,,}" == "${accept,,}" ]]; then
-            break
-        fi
-    fi
-done
- 
-echo "New inputs are as follows, please validate your inputs"
-echo
-echo "Server Username: " $username
-echo "Server Password: " $password
-echo "MySQL Password: " $mysql_root_password
-echo "Frappe Version: " $version
-echo "Bench name: " $bench_name
-echo "Site name: " $sitename
-echo "ERPNext Admin Password: " $adminpassword
-echo "Selected CPU Architecture: " $arch
-echo
-echo -e "${bold}Please verify the inputs. ${RED}You can not change the inputs at this stage${normal}${NC}"
-echo
- 
-echo "Are you sure you want to proceed with the installation? Press ${bold}Y${normal} to proceed or press ${bold}any key${normal} to cancel the installation"
-read -p "${normal}Please enter your choice: " confirmation
-if [[ "${confirmation,,}" != "${accept,,}" ]]; then
-    echo "Cancelling installation!!"
+LIGHT_BLUE='\033[1;34m'
+NC='\033[0m' # No Color
+
+# Check Ubuntu 22.04
+if [ "$(lsb_release -is)" != "Ubuntu" ] || [ "$(lsb_release -rs)" != "22.04" ]; then
+    echo -e "${RED}This script is only compatible with Ubuntu 22.04.${NC}"
     exit 1
 fi
- 
-cat << "EOF"
--------------------------------------------------------------------
-/  _____             _          _  _         _    _                \
-/ |_   _|           | |        | || |       | |  (_)               \
-/   | |  _ __   ___ | |_  __ _ | || |  __ _ | |_  _   ___   _ __   \
-/   | | | '_ \ / __|| __|/ _` || || | / _` || __|| | / _ \ | '_ \  \
-/  _| |_| | | |\__ \| |_| (_| || || || (_| || |_ | || (_) || | | | \
-/  \___/|_| |_||___/ \__|\__,_||_||_| \__,_| \__||_| \___/ |_| |_| \
-/                                                                  \                                                               
--------------------------------------------------------------------
-EOF
- 
-cat << "EOF"
------------------------------------------------------------
-|   _____                 __         __  __             
-|  / ___/____ ___  ___ _ / /_ ___   / / / /___ ___  ____
-| / /__ / __// -_)/ _ `// __// -_) / /_/ /(_-</ -_)/ __/
-| \___//_/   \__/ \_,_/ \__/ \__/  \____//___/\__//_/   
-|                                                       
------------------------------------------------------------
-EOF
- 
-sudo apt-get update && sudo apt-get upgrade -y
-pass=$(perl -e 'print crypt($ARGV[0], "password")' $password)
-sudo useradd -m -s /bin/bash -p "$pass" "$username"
-[ $? -eq 0 ] && echo "User has been added to the system" || "Failed to add the user"
-sudo usermod -aG sudo $username
-echo "${username} ALL=(ALL) NOPASSWD:ALL" | sudo EDITOR="tee -a" visudo
- 
-# Alias python
-# sudo -u $username echo 'alias python="python3"' >> /home/$username/.bashrc
-#sudo -u $username bash -c "cd /home/${username} && source .bashrc"
-# export PYTHON=python3
- 
-cat << "EOF"
------------------------------------------------------------------
-|    ____           __         __ __                          
-|   /  _/___   ___ / /_ ___ _ / // /                          
-|  _/ / / _ \ (_-</ __// _ `// // /                           
-| /___//_//_//___/\__/ \_,_//_//_/__                _         
-|   / _ \ ___  ___  ___  ___  ___/ /___  ___  ____ (_)___  ___
-|  / // // -_)/ _ \/ -_)/ _ \/ _  // -_)/ _ \/ __// // -_)(_-<
-| /____/ \__// .__/\__//_//_/\_,_/ \__//_//_/\__//_/ \__//___/
-|           /_/                                               
------------------------------------------------------------------
-EOF
- 
-# echo $is_arm
-deps_installation $username $is_arm
- 
-cat << "EOF"
-------------------------------------------------------------------------
-|    __  ___            _        ___   ___                           
-|   /  |/  /___ _ ____ (_)___ _ / _ \ / _ )                          
-|  / /|_/ // _ `// __// // _ `// // // _  |                          
-| /_/__/_/ \_,_//_/  /_/_\_,_//____//____/          __   _           
-|  / ___/___   ___   / _/(_)___ _ __ __ ____ ___ _ / /_ (_)___   ___ 
-| / /__ / _ \ / _ \ / _// // _ `// // // __// _ `// __// // _ \ / _ \
-| \___/ \___//_//_//_/ /_/ \_, / \_,_//_/   \_,_/ \__//_/ \___//_//_/
-|                         /___/                                      
-------------------------------------------------------------------------
-EOF
- 
-mariadb_config $username $mysql_root_password
- 
-# Secure MariaDB
-#sudo mysql_secure_installation <<EOF
-#
-#y
-#$mysql_root_password
-#$mysql_root_password
-#y
-#y
-#y
-#y
-#EOF
- 
-echo -e "${bold}${RED}Warning! Please use the same mysql root password entered at the beginning${NC}"
-sudo mysql_secure_installation
- 
-cat << "EOF"
----------------------------------------------------------
-|    ____           __         __ __ _           
-|   /  _/___   ___ / /_ ___ _ / // /(_)___  ___ _
-|  _/ / / _ \ (_-</ __// _ `// // // // _ \/ _ `/
-| /___//_//_//___/\__/ \_,_//_//_//_//_//_/\_, / 
-|   / __/____ ___ _ ___   ___  ___        /___/  
-|  / _/ / __// _ `// _ \ / _ \/ -_)              
-| /_/  /_/   \_,_// .__// .__/\__/               
-|                /_/   /_/                       
----------------------------------------------------------
-EOF
- 
-# https://discuss.frappe.io/t/please-make-sure-that-redis-queue-runs-redis-localhost-11000/105542/4
-# Check for ARM64
- 
-if [ "${is_arm}" = true ]; then
-    echo "port 11000" | sudo tee -a /etc/redis/redis.conf
-    sudo systemctl restart redis-server
+
+# Retrieve server IP
+server_ip=$(hostname -I | awk '{print $1}')
+
+# Prompt user for site name
+read -p "Enter the website name: " site_name
+
+# Set default passwords
+sql_password="123123"
+admin_password="123123"
+
+# Installing required packages
+echo -e "${YELLOW}Installing required packages...${NC}"
+sleep 2
+
+sudo apt update
+sudo apt upgrade -y
+sudo apt install software-properties-common git curl python3-dev python3-setuptools python3-venv python3-pip python3-distutils redis-server -y
+sudo apt install mariadb-server mariadb-client -y
+sudo apt install build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev -y
+sudo apt install fontconfig xvfb libfontconfig wkhtmltopdf -y
+
+echo -e "${GREEN}Packages installed.${NC}"
+sleep 2
+
+# Install Python 3.10 if not already installed or version is less than 3.10
+py_version=$(python3 --version 2>&1 | awk '{print $2}')
+py_major=$(echo "$py_version" | cut -d '.' -f 1)
+py_minor=$(echo "$py_version" | cut -d '.' -f 2)
+
+if [ -z "$py_version" ] || [ "$py_major" -lt 3 ] || [ "$py_major" -eq 3 -a "$py_minor" -lt 10 ]; then
+    echo -e "${LIGHT_BLUE}Installing Python 3.10+...${NC}"
+    sleep 2
+
+    sudo apt -qq install python3.10 python3.10-dev python3.10-venv -y
+    sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
+    sudo update-alternatives --set python3 /usr/bin/python3.10
+    sudo apt install python3-pip -y
+    sudo pip3 install --user --upgrade pip
+    echo -e "${GREEN}Python3.10 installation successful!${NC}"
+    sleep 2
 fi
-frappe_installation $username $version $bench_name
- 
-cat << "EOF"
------------------------------------------------------
-|    ____           __         __ __ _           
-|   /  _/___   ___ / /_ ___ _ / // /(_)___  ___ _
-|  _/ / / _ \ (_-</ __// _ `// // // // _ \/ _ `/
-| /___//_//_//___/\__/ \_,_//_//_//_//_//_/\_, / 
-|    ____ ___   ___   _  __           __  /___/  
-|   / __// _ \ / _ \ / |/ /___ __ __ / /_        
-|  / _/ / , _// ___//    // -_)\ \ // __/        
-| /___//_/|_|/_/   /_/|_/ \__//_\_\ \__/         
-|                                                
------------------------------------------------------
-EOF
- 
-erpnext_install $username $sitename $mysql_root_password $adminpassword $version $bench_name $multi_tenancy
- 
-if [ "${is_arm}" = true ]; then
-    sudo sed -i 's/port 11000//g' /etc/redis/redis.conf
-    sudo systemctl restart redis-server
-fi
- 
-#
-# Set for production
-cat << "EOF"
-------------------------------------------------------------
-|    ____      __   __   _              __  __         
-|   / __/___  / /_ / /_ (_)___  ___ _  / / / /___      
-|  _\ \ / -_)/ __// __// // _ \/ _ `/ / /_/ // _ \     
-| /___/ \__/ \__/ \__//_//_//_/\_, /  \____// .__/     
-|    ___                __    /___/   __   /_/         
-|   / _ \ ____ ___  ___/ /__ __ ____ / /_ (_)___   ___ 
-|  / ___// __// _ \/ _  // // // __// __// // _ \ / _ \
-| /_/   /_/   \___/\_,_/ \_,_/ \__/ \__//_/ \___//_//_/
-|                                                      
-------------------------------------------------------------
-EOF
- 
-sudo -u $username chmod 701 /home/$username
-sudo -u $username bash -c "cd /home/${username}/${bench_name}; sudo bench setup production ${username}"
- 
-sudo -u $username bash -c "tmux new -d -s erpnext_session"
-sudo -u $username bash -c "tmux send-keys -t erpnext_session.0 'cd /home/${username}/${bench_name}; bench start' ENTER"
- 
-sleep 20
- 
-sudo -u $username bash -c "cd /home/${username}/${bench_name}; sudo bench setup production ${username} <<EOF
-y
-y
-EOF"
- 
-sudo -u $username bash -c "tmux send-keys -t erpnext_session C-c"
-sudo -u $username bash -c "tmux kill-session -t erpnext_session"
- 
-cat << "EOF"
---------------------------------------------------
-|    ____ ____ __     ____      __            
-|   / __// __// /    / __/___  / /_ __ __ ___ 
-|  _\ \ _\ \ / /__  _\ \ / -_)/ __// // // _ \
-| /___//___//____/ /___/ \__/ \__/ \_,_// .__/
-|                                      /_/    
---------------------------------------------------
-EOF
- 
-# install snapd if not available
-if ! command -v snapd > /dev/null 2>&1; then
-    echo "snapd not found, installing..."
-    sudo apt-get update && sudo apt-get install -y snapd
-else
-    echo "snapd found, no need to install."
-fi
- 
-# Install certbot
-sudo snap install core; sudo snap refresh core
-if ! command -v certbot > /dev/null 2>&1; then
-    echo "Certbot not found. Installing..."
-    sudo snap install --classic certbot
-    sudo ln -s /snap/bin/certbot /usr/bin/certbot
-fi
-# Generate certificate
-sudo certbot --nginx #<<EOF
-#$mail_address
-#y
-#y
-#
-#EOF
- 
-cat << "EOF"
-------------------------------------------------------------------------
-|    __  ___       __ __   _   ______                                  
-|   /  |/  /__ __ / // /_ (_) /_  __/___  ___  ___ _ ___  ____ __ __   
-|  / /|_/ // // // // __// /   / /  / -_)/ _ \/ _ `// _ \/ __// // /   
-| /_/__/_/ \_,_//_/ \__//_/   /_/   \__//_//_/\_,_//_//_/\__/ \_, /    
-|   / __/___  / /_ __ __ ___                                 /___/     
-|  _\ \ / -_)/ __// // // _ \                                          
-| /___/ \__/ \__/ \_,_// .__/                                          
-|                     /_/                                              
-------------------------------------------------------------------------
-EOF
- 
-read -p "Do you want to setup Multi Tenancy? Press ${bold} Y ${normal} to continue or Press ${bold} any key ${normal}to finish installation: " choice
-if [[ "${choice,,}" == "${accept,,}" ]]; then
-    multi_tenancy=true
- 
-    while :
-    do
-        while :
-        do
-            read -p $'Please enter the site name: \n' new_sitename
-            [ -z "$new_sitename" ] && continue || break
-        done
- 
-        while :
-        do
-            read -s -p $'Please enter the ERPNext admin password: \n' new_adminpassword
-            [ -z "$new_adminpassword" ] && continue || break
-        done
- 
-        # if [ "${is_arm}" = true ]; then
-        #     echo "port 11000" | sudo tee -a /etc/redis/redis.conf
-        #     sudo systemctl restart redis-server
-        # fi
- 
-        sudo -u $username bash -c "cd /home/${username}/${bench_name} && bench config dns_multitenant on"
-        erpnext_install $username $new_sitename $mysql_root_password $new_adminpassword $version $bench_name $multi_tenancy
- 
-        # if [ "${is_arm}" = true ]; then
-        #     sudo sed -i 's/port 11000//g' /etc/redis/redis.conf
-        #     sudo systemctl restart redis-server
-        # fi    
- 
-        echo "Do you want to add more sites?"
-        read -p "Please enter ${bold}Y${normal} to add more site or ${bold}any key${normal} to continue: " is_more_sites
- 
-        if [[ "${is_more_sites,,}" == "${accept,,}" ]]; then
-            continue
-        else
-            break
-        fi
-    done
- 
-    sudo -u $username bash -c "cd /home/${username}/${bench_name} && bench setup nginx"
-    sudo systemctl reload nginx
-    sudo certbot --nginx
- 
-    echo
-    echo "${bold}Installation Finished! Enjoy...${normal}"
-    echo
- 
-else
-    echo
-    echo "${bold}Installation Finished! Enjoy...${normal}"
-    echo
-fi
- 
-# Revert the privileges
-sudo sed -i "s/${username} ALL=(ALL) NOPASSWD:ALL//g" /etc/sudoers
-# echo "${username} ALL=(ALL:ALL) ALL" | sudo EDITOR="tee -a" visudo
-else
-    echo -e "${RED}Invalid Choice${NC}"
-fi
+
+# Install NVM, Node, npm, and yarn
+echo -e "${YELLOW}Installing NVM, Node, npm, and yarn...${NC}"
+sleep 2
+curl https://raw.githubusercontent.com/creationix/nvm/master/install.sh | bash
+source ~/.profile
+
+nvm install --lts
+
+sudo apt-get -qq install npm -y
+sudo npm install -g yarn
+
+echo -e "${GREEN}NVM, Node, npm, and yarn installed.${NC}"
+sleep 2
+
+# Install Frappe Bench
+echo -e "${YELLOW}Installing Frappe Bench...${NC}"
+sleep 2
+sudo pip3 install frappe-bench
+
+# Initialize bench in frappe-bench folder
+echo -e "${YELLOW}Initializing bench in frappe-bench folder...${NC}"
+bench init frappe-bench --verbose --python $(which python3)
+
+# Go to frappe-bench directory
+cd frappe-bench
+
+# Create new site with ERPNext, HRMS, and Chat
+echo -e "${YELLOW}Creating a new site with ERPNext, HRMS, and Chat...${NC}"
+bench --site $site_name --install-app erpnext --install-app hrms --install-app chat
+echo -e "${GREEN}Site created.${NC}"
+
+# Set MySQL root password
+sudo mysqladmin -u root password $sql_password
+
+# Set up in production mode
+echo -e "${YELLOW}Setting up in production mode...${NC}"
+sleep 2
+bench setup production $USER
+
+# Set site administrator password
+sudo bench --site $site_name set-admin-password $admin_password
+
+# Restart services with supervisor
+echo -e "${YELLOW}Restarting services with supervisor...${NC}"
+sudo supervisorctl reread
+sudo supervisorctl update
+sudo supervisorctl restart all
+
+# Display information
+echo -e "${GREEN}-----------------------------------------------------------------------------------------------"
+echo -e "Congratulations! You have successfully installed ERPNext, HRMS, and Chat on your Ubuntu 22.04 system."
+echo -e "You can access your ERPNext instance by visiting https://$site_name"
+echo -e "Login with the following credentials:"
+echo -e "Administrator: Administrator"
+echo -e "Password: $admin_password"
+echo -e "Make sure to change the default passwords after the first login."
+echo -e "For more information, visit https://docs.erpnext.com for Documentation."
+echo -e "Enjoy using ERPNext, HRMS, and Chat!"
+echo -e "-----------------------------------------------------------------------------------------------${NC}"
+
+# Message for Future Support Team
+echo -e "${YELLOW}-----------------------------------------------------------------------------------------------"
+echo -e "For future support, contact the support team at:"
+echo -e "Phone: 002-01156483669"
+echo -e "WhatsApp: https://wa.me/201156483669/"
+echo -e "Include details about your system configuration and any issues you encounter."
+echo -e "Thank you for choosing ERPNext!${NC}"
