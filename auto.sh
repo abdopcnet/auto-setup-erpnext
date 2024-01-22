@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -e
+set -ex
 
 # Setting up colors for echo commands
 YELLOW='\033[1;33m'
@@ -105,10 +105,6 @@ sudo -u frappe bench --site $site_name set-admin-password $admin_password
 # Restart services
 sudo service supervisor restart
 sudo service nginx restart
-
-# Update supervisorctl in PATH
-export PATH=$PATH:/usr/bin
-echo 'export PATH=$PATH:/usr/bin' >> ~/.bashrc
 
 echo -e "${GREEN}Setup completed successfully.${NC}"
 sleep 2
